@@ -44,6 +44,15 @@ func (h hexBytes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(h))
 }
 
+func (h *hexBytes) UnmarshalJSON(data []byte) (err error) {
+	var s string
+	if err = json.Unmarshal(data, &s); err != nil {
+		return
+	}
+	*h, err = hex.DecodeString(s)
+	return
+}
+
 func New(hops []*Hop) (*Onion, error) {
 	privKey, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {

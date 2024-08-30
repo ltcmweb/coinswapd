@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/ecdh"
+	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"time"
@@ -8,6 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ltcmweb/coinswapd/onion"
 	"github.com/ltcmweb/ltcd/chaincfg"
+	"github.com/ltcmweb/ltcd/chaincfg/chainhash"
+	"github.com/ltcmweb/ltcd/ltcutil/mweb/mw"
+	"github.com/ltcmweb/ltcd/wire"
 	"github.com/ltcmweb/neutrino"
 	"github.com/ltcsuite/ltcwallet/walletdb"
 	_ "github.com/ltcsuite/ltcwallet/walletdb/bdb"
@@ -16,6 +22,9 @@ import (
 var (
 	db walletdb.DB
 	cs *neutrino.ChainService
+
+	serverKey     *ecdh.PrivateKey
+	serverKeyFlag = flag.String("k", "", "ECDH private key")
 )
 
 func main() {
@@ -25,6 +34,12 @@ func main() {
 			fmt.Println(err)
 		}
 	}()
+
+	flag.Parse()
+	serverKey, err = ecdh.X25519().NewPrivateKey([]byte(*serverKeyFlag))
+	if err != nil {
+		return
+	}
 
 	db, err = walletdb.Create("bdb", "neutrino.db", true, time.Minute)
 	if err != nil {
@@ -44,7 +59,7 @@ func main() {
 	}
 
 	server := rpc.NewServer()
-	server.RegisterName("rpc", &swapService{})
+	server.RegisterName("swap", &swapService{})
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(":8080", nil)
 
@@ -62,6 +77,39 @@ func main() {
 
 type swapService struct{}
 
-func (s *swapService) Swap(onion *onion.Onion) error {
-	return nil
+func (s *swapService) Swap(onion onion.Onion) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			switch r := r.(type) {
+			case string:
+				err = errors.New(r)
+			case error:
+				err = r
+			}
+		}
+	}()
+	input := &wire.MwebInput{
+		Features:     wire.MwebInputStealthKeyFeatureBit,
+		OutputId:     chainhash.Hash(onion.Input.OutputId),
+		Commitment:   mw.Commitment(onion.Input.Commitment),
+		InputPubKey:  (*mw.PublicKey)(onion.Input.InputPubKey),
+		OutputPubKey: mw.PublicKey(onion.Input.OutputPubKey),
+		Signature:    mw.Signature(onion.Input.Signature),
+	}
+	output, err := cs.MwebCoinDB.FetchCoin(&input.OutputId)
+	if err != nil {
+		return
+	}
+	if input.Commitment != output.Commitment {
+		return errors.New("commitment mismatch")
+	}
+	if input.OutputPubKey != output.ReceiverPubKey {
+		return errors.New("output pubkey mismatch")
+	}
+	hop, onion2, err := onion.Peel(serverKey)
+	if err != nil {
+		return
+	}
+	fmt.Println(hop, onion2)
+	return
 }
