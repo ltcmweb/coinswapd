@@ -4,8 +4,8 @@ go 1.21
 
 require (
 	github.com/ethereum/go-ethereum v1.14.8
-	github.com/ltcmweb/ltcd v0.24.4-0.20240719112335-b44674e8e4a0
-	github.com/ltcmweb/ltcd/ltcutil v1.2.4-0.20240719112335-b44674e8e4a0
+	github.com/ltcmweb/ltcd v0.24.4-0.20240901151044-e6d090ecfee0
+	github.com/ltcmweb/ltcd/chaincfg/chainhash v1.0.3
 	github.com/ltcmweb/neutrino v0.17.1
 	github.com/ltcsuite/ltcwallet/walletdb v1.3.5
 	golang.org/x/crypto v0.22.0
@@ -30,7 +30,6 @@ require (
 	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/ltcmweb/ltcd/btcec/v2 v2.3.3 // indirect
-	github.com/ltcmweb/ltcd/chaincfg/chainhash v1.0.3 // indirect
 	github.com/ltcmweb/neutrino/cache v1.1.0 // indirect
 	github.com/ltcmweb/secp256k1 v0.1.0 // indirect
 	github.com/ltcsuite/lnd/queue v1.1.0 // indirect

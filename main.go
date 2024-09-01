@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ecdh"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,6 +41,7 @@ func main() {
 	if err != nil {
 		return
 	}
+	fmt.Println("Public key =", hex.EncodeToString(serverKey.PublicKey().Bytes()))
 
 	db, err = walletdb.Create("bdb", "neutrino.db", true, time.Minute)
 	if err != nil {
@@ -105,6 +107,12 @@ func (s *swapService) Swap(onion onion.Onion) (err error) {
 	}
 	if input.OutputPubKey != output.ReceiverPubKey {
 		return errors.New("output pubkey mismatch")
+	}
+	if !input.VerifySig() {
+		return errors.New("verify input sig failed")
+	}
+	if !onion.VerifySig() {
+		return errors.New("verify onion sig failed")
 	}
 	hop, onion2, err := onion.Peel(serverKey)
 	if err != nil {

@@ -126,20 +126,36 @@ func (onion *Onion) Sign(input *wire.MwebInput, spendKey *mw.SecretKey) {
 	onion.Input.InputPubKey = input.InputPubKey[:]
 	onion.Input.Signature = input.Signature[:]
 
-	var msg bytes.Buffer
-	msg.Write(onion.Input.OutputId)
-	msg.Write(onion.Input.Commitment)
-	msg.Write(onion.Input.OutputPubKey)
-	msg.Write(onion.Input.InputPubKey)
-	msg.Write(onion.Input.Signature)
-	msg.Write(onion.Payloads)
-	msg.Write(onion.PubKey)
-
 	h := blake3.New(32, nil)
 	h.Write(input.InputPubKey[:])
 	h.Write(input.OutputPubKey[:])
-	sig := mw.Sign(spendKey.Mul((*mw.SecretKey)(h.Sum(nil))), msg.Bytes())
+	keyHash := (*mw.SecretKey)(h.Sum(nil))
+
+	sig := mw.Sign(spendKey.Mul(keyHash), onion.sigMsg())
 	onion.OwnerProof = sig[:]
+}
+
+func (onion *Onion) sigMsg() []byte {
+	var buf bytes.Buffer
+	buf.Write(onion.Input.OutputId)
+	buf.Write(onion.Input.Commitment)
+	buf.Write(onion.Input.OutputPubKey)
+	buf.Write(onion.Input.InputPubKey)
+	buf.Write(onion.Input.Signature)
+	buf.Write(onion.Payloads)
+	buf.Write(onion.PubKey)
+	return buf.Bytes()
+}
+
+func (onion *Onion) VerifySig() bool {
+	h := blake3.New(32, nil)
+	h.Write(onion.Input.InputPubKey)
+	h.Write(onion.Input.OutputPubKey)
+	keyHash := (*mw.SecretKey)(h.Sum(nil))
+
+	sig := (*mw.Signature)(onion.OwnerProof)
+	outputPubKey := (*mw.PublicKey)(onion.Input.OutputPubKey)
+	return sig.Verify(outputPubKey.Mul(keyHash), onion.sigMsg())
 }
 
 func (onion *Onion) Peel(privKey *ecdh.PrivateKey) (*Hop, *Onion, error) {
