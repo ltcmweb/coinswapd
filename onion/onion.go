@@ -153,7 +153,11 @@ func (onion *Onion) VerifySig() bool {
 	h.Write(onion.Input.OutputPubKey)
 	keyHash := (*mw.SecretKey)(h.Sum(nil))
 
+	if len(onion.OwnerProof) != len(mw.Signature{}) {
+		return false
+	}
 	sig := (*mw.Signature)(onion.OwnerProof)
+
 	outputPubKey := (*mw.PublicKey)(onion.Input.OutputPubKey)
 	return sig.Verify(outputPubKey.Mul(keyHash), onion.sigMsg())
 }

@@ -77,47 +77,83 @@ func main() {
 	}
 }
 
-type swapService struct{}
+type swapService struct {
+	onions map[mw.Commitment]*onion.Onion
+}
 
-func (s *swapService) Swap(onion onion.Onion) (err error) {
+func (s *swapService) Swap(onion onion.Onion) error {
+	commit, err := validateOnion(&onion)
+	if err != nil {
+		return err
+	}
+	s.onions[*commit] = &onion
+	return nil
+}
+
+func (s *swapService) performSwap() error {
+	onions := map[mw.Commitment]*onion.Onion{}
+
+	for _, onion := range s.onions {
+		commit, err := validateOnion(onion)
+		if err != nil {
+			continue
+		}
+
+		hop, _, err := onion.Peel(serverKey)
+		if err != nil {
+			continue
+		}
+
+		commit = commit.Add(mw.NewCommitment(&hop.KernelBlind, 0))
+		commit = commit.Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
+		onions[*commit] = onion
+	}
+
+	s.onions = onions
+
+	return nil
+}
+
+func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			switch r := r.(type) {
-			case string:
-				err = errors.New(r)
-			case error:
-				err = r
-			}
+		if recover() != nil {
+			err = errors.New("unable to parse input")
 		}
 	}()
-	input := &wire.MwebInput{
+	return &wire.MwebInput{
 		Features:     wire.MwebInputStealthKeyFeatureBit,
 		OutputId:     chainhash.Hash(onion.Input.OutputId),
 		Commitment:   mw.Commitment(onion.Input.Commitment),
 		InputPubKey:  (*mw.PublicKey)(onion.Input.InputPubKey),
 		OutputPubKey: mw.PublicKey(onion.Input.OutputPubKey),
 		Signature:    mw.Signature(onion.Input.Signature),
+	}, nil
+}
+
+func validateOnion(onion *onion.Onion) (*mw.Commitment, error) {
+	input, err := inputFromOnion(onion)
+	if err != nil {
+		return nil, err
 	}
+
 	output, err := cs.MwebCoinDB.FetchCoin(&input.OutputId)
 	if err != nil {
-		return
+		return nil, err
 	}
+
 	if input.Commitment != output.Commitment {
-		return errors.New("commitment mismatch")
+		return nil, errors.New("commitment mismatch")
 	}
 	if input.OutputPubKey != output.ReceiverPubKey {
-		return errors.New("output pubkey mismatch")
+		return nil, errors.New("output pubkey mismatch")
 	}
+
 	if !input.VerifySig() {
-		return errors.New("verify input sig failed")
+		return nil, errors.New("verify input sig failed")
 	}
 	if !onion.VerifySig() {
-		return errors.New("verify onion sig failed")
+		return nil, errors.New("verify onion sig failed")
 	}
-	hop, onion2, err := onion.Peel(serverKey)
-	if err != nil {
-		return
-	}
-	fmt.Println(hop, onion2)
-	return
+
+	return &input.Commitment, nil
 }
