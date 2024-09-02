@@ -80,6 +80,7 @@ func main() {
 
 	server := rpc.NewServer()
 	server.RegisterName("swap", &swapService{
+		nodes:  nodes,
 		onions: map[mw.Commitment]*onion.Onion{},
 	})
 	http.HandleFunc("/", server.ServeHTTP)
@@ -98,6 +99,7 @@ func main() {
 }
 
 type swapService struct {
+	nodes  []config.Node
 	onions map[mw.Commitment]*onion.Onion
 }
 
@@ -107,30 +109,6 @@ func (s *swapService) Swap(onion onion.Onion) error {
 		return err
 	}
 	s.onions[*commit] = &onion
-	return nil
-}
-
-func (s *swapService) performSwap() error {
-	onions := map[mw.Commitment]*onion.Onion{}
-
-	for _, onion := range s.onions {
-		commit, err := validateOnion(onion)
-		if err != nil {
-			continue
-		}
-
-		hop, _, err := onion.Peel(serverKey)
-		if err != nil {
-			continue
-		}
-
-		commit = commit.Add(mw.NewCommitment(&hop.KernelBlind, 0))
-		commit = commit.Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
-		onions[*commit] = onion
-	}
-
-	s.onions = onions
-
 	return nil
 }
 
