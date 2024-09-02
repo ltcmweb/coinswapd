@@ -96,7 +96,7 @@ func New(hops []*Hop) (*Onion, error) {
 	}
 
 	for i := len(payloads) - 1; i >= 0; i-- {
-		cipher := newCipher(secrets[i])
+		cipher := NewCipher(secrets[i])
 		for j := i; j < len(payloads); j++ {
 			cipher.XORKeyStream(payloads[j], payloads[j])
 		}
@@ -112,7 +112,7 @@ func New(hops []*Hop) (*Onion, error) {
 	return onion, nil
 }
 
-func newCipher(secret []byte) *chacha20.Cipher {
+func NewCipher(secret []byte) *chacha20.Cipher {
 	h := hmac.New(sha256.New, []byte("MWIXNET"))
 	h.Write(secret)
 	cipher, _ := chacha20.NewUnauthenticatedCipher(h.Sum(nil), []byte("NONCE1234567"))
@@ -153,11 +153,7 @@ func (onion *Onion) VerifySig() bool {
 	h.Write(onion.Input.OutputPubKey)
 	keyHash := (*mw.SecretKey)(h.Sum(nil))
 
-	if len(onion.OwnerProof) != len(mw.Signature{}) {
-		return false
-	}
 	sig := (*mw.Signature)(onion.OwnerProof)
-
 	outputPubKey := (*mw.PublicKey)(onion.Input.OutputPubKey)
 	return sig.Verify(outputPubKey.Mul(keyHash), onion.sigMsg())
 }
@@ -171,7 +167,7 @@ func (onion *Onion) Peel(privKey *ecdh.PrivateKey) (*Hop, *Onion, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	cipher := newCipher(secret)
+	cipher := NewCipher(secret)
 
 	var (
 		count, size uint64

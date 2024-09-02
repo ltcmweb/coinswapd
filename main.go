@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ltcmweb/coinswapd/config"
 	"github.com/ltcmweb/coinswapd/onion"
 	"github.com/ltcmweb/ltcd/chaincfg"
 	"github.com/ltcmweb/ltcd/chaincfg/chainhash"
@@ -26,6 +27,10 @@ var (
 
 	serverKey     *ecdh.PrivateKey
 	serverKeyFlag = flag.String("k", "", "ECDH private key")
+
+	nodeIndex = -1
+
+	port = flag.Int("l", 8080, "Listen port")
 )
 
 func main() {
@@ -41,7 +46,19 @@ func main() {
 	if err != nil {
 		return
 	}
-	fmt.Println("Public key =", hex.EncodeToString(serverKey.PublicKey().Bytes()))
+	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
+	fmt.Println("Public key =", pubKey)
+
+	for i, node := range config.Nodes {
+		if node.PubKey == pubKey {
+			fmt.Println("Node", i+1, "of", len(config.Nodes))
+			nodeIndex = i
+		}
+	}
+	if nodeIndex < 0 {
+		fmt.Println("Public key not found in config")
+		return
+	}
 
 	db, err = walletdb.Create("bdb", "neutrino.db", true, time.Minute)
 	if err != nil {
@@ -63,7 +80,7 @@ func main() {
 	server := rpc.NewServer()
 	server.RegisterName("swap", &swapService{})
 	http.HandleFunc("/", server.ServeHTTP)
-	go http.ListenAndServe(":8080", nil)
+	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 
 	for height := uint32(0); ; <-time.After(2 * time.Second) {
 		_, height2, err := cs.BlockHeaders.ChainTip()
@@ -81,11 +98,18 @@ type swapService struct {
 	onions map[mw.Commitment]*onion.Onion
 }
 
-func (s *swapService) Swap(onion onion.Onion) error {
+func (s *swapService) Swap(onion onion.Onion) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errors.New("unable to verify input")
+		}
+	}()
+
 	commit, err := validateOnion(&onion)
 	if err != nil {
 		return err
 	}
+
 	s.onions[*commit] = &onion
 	return nil
 }
@@ -114,12 +138,7 @@ func (s *swapService) performSwap() error {
 	return nil
 }
 
-func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
-	defer func() {
-		if recover() != nil {
-			err = errors.New("unable to parse input")
-		}
-	}()
+func inputFromOnion(onion *onion.Onion) *wire.MwebInput {
 	return &wire.MwebInput{
 		Features:     wire.MwebInputStealthKeyFeatureBit,
 		OutputId:     chainhash.Hash(onion.Input.OutputId),
@@ -127,14 +146,11 @@ func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
 		InputPubKey:  (*mw.PublicKey)(onion.Input.InputPubKey),
 		OutputPubKey: mw.PublicKey(onion.Input.OutputPubKey),
 		Signature:    mw.Signature(onion.Input.Signature),
-	}, nil
+	}
 }
 
 func validateOnion(onion *onion.Onion) (*mw.Commitment, error) {
-	input, err := inputFromOnion(onion)
-	if err != nil {
-		return nil, err
-	}
+	input := inputFromOnion(onion)
 
 	output, err := cs.MwebCoinDB.FetchCoin(&input.OutputId)
 	if err != nil {
