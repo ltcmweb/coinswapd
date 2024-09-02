@@ -25,23 +25,32 @@ func (s *swapService) performSwap() error {
 	return s.forward()
 }
 
-func (s *swapService) peelOnions() map[*mw.Commitment]*onion.Onion {
-	onions := map[*mw.Commitment]*onion.Onion{}
+func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
+	onions := map[mw.Commitment]*onion.Onion{}
+
 	for commit, onion := range s.onions {
 		hop, onion, err := onion.Peel(serverKey)
 		if err != nil {
+			delete(s.onions, commit)
 			continue
 		}
-		commit = *commit.Add(mw.NewCommitment(&hop.KernelBlind, 0))
-		commit = *commit.Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
-		onions[&commit] = onion
+
+		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
+			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
+
+		if _, ok := onions[*commit2]; ok {
+			delete(s.onions, commit)
+		} else {
+			onions[*commit2] = onion
+		}
 	}
+
 	return onions
 }
 
 func (s *swapService) forward() error {
 	onions := s.peelOnions()
-	commits := slices.SortedFunc(maps.Keys(onions), func(c1, c2 *mw.Commitment) int {
+	commits := slices.SortedFunc(maps.Keys(onions), func(c1, c2 mw.Commitment) int {
 		a := new(big.Int).SetBytes(c1[:])
 		b := new(big.Int).SetBytes(c2[:])
 		return a.Cmp(b)
@@ -93,7 +102,7 @@ func (s *swapService) Forward(data []byte) error {
 
 	var (
 		count  int
-		commit *mw.Commitment
+		commit mw.Commitment
 		onion  *onion.Onion
 	)
 	dec := gob.NewDecoder(bytes.NewReader(data))
@@ -107,7 +116,7 @@ func (s *swapService) Forward(data []byte) error {
 		if err = dec.Decode(&onion); err != nil {
 			return err
 		}
-		s.onions[*commit] = onion
+		s.onions[commit] = onion
 	}
 
 	return s.forward()
