@@ -49,9 +49,10 @@ func main() {
 	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
 	fmt.Println("Public key =", pubKey)
 
-	for i, node := range config.Nodes {
+	nodes := config.AliveNodes(pubKey)
+	for i, node := range nodes {
 		if node.PubKey == pubKey {
-			fmt.Println("Node", i+1, "of", len(config.Nodes))
+			fmt.Println("Node", i+1, "of", len(nodes))
 			nodeIndex = i
 		}
 	}
@@ -78,7 +79,9 @@ func main() {
 	}
 
 	server := rpc.NewServer()
-	server.RegisterName("swap", &swapService{})
+	server.RegisterName("swap", &swapService{
+		onions: map[mw.Commitment]*onion.Onion{},
+	})
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 
@@ -98,7 +101,7 @@ type swapService struct {
 	onions map[mw.Commitment]*onion.Onion
 }
 
-func (s *swapService) Swap(onion onion.Onion) (err error) {
+func (s *swapService) Swap(onion onion.Onion) error {
 	commit, err := validateOnion(&onion)
 	if err != nil {
 		return err
