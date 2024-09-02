@@ -99,17 +99,10 @@ type swapService struct {
 }
 
 func (s *swapService) Swap(onion onion.Onion) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = errors.New("unable to verify input")
-		}
-	}()
-
 	commit, err := validateOnion(&onion)
 	if err != nil {
 		return err
 	}
-
 	s.onions[*commit] = &onion
 	return nil
 }
@@ -138,7 +131,8 @@ func (s *swapService) performSwap() error {
 	return nil
 }
 
-func inputFromOnion(onion *onion.Onion) *wire.MwebInput {
+func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
+	defer func() { err, _ = recover().(error) }()
 	return &wire.MwebInput{
 		Features:     wire.MwebInputStealthKeyFeatureBit,
 		OutputId:     chainhash.Hash(onion.Input.OutputId),
@@ -146,11 +140,14 @@ func inputFromOnion(onion *onion.Onion) *wire.MwebInput {
 		InputPubKey:  (*mw.PublicKey)(onion.Input.InputPubKey),
 		OutputPubKey: mw.PublicKey(onion.Input.OutputPubKey),
 		Signature:    mw.Signature(onion.Input.Signature),
-	}
+	}, nil
 }
 
 func validateOnion(onion *onion.Onion) (*mw.Commitment, error) {
-	input := inputFromOnion(onion)
+	input, err := inputFromOnion(onion)
+	if err != nil {
+		return nil, err
+	}
 
 	output, err := cs.MwebCoinDB.FetchCoin(&input.OutputId)
 	if err != nil {

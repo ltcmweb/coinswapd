@@ -148,6 +148,8 @@ func (onion *Onion) sigMsg() []byte {
 }
 
 func (onion *Onion) VerifySig() bool {
+	defer func() { recover() }()
+
 	h := blake3.New(32, nil)
 	h.Write(onion.Input.InputPubKey)
 	h.Write(onion.Input.OutputPubKey)
