@@ -261,5 +261,16 @@ func (s *swapService) Backward(data []byte) error {
 		kernels = append(kernels, kernel)
 	}
 
+	for commit, onion := range s.onions {
+		hop, _, _ := onion.Peel(serverKey)
+
+		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
+			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
+
+		if !slices.Contains(commits, *commit2) {
+			delete(s.onions, commit)
+		}
+	}
+
 	return s.backward(kernels)
 }

@@ -4,7 +4,7 @@ go 1.23
 
 require (
 	github.com/ethereum/go-ethereum v1.14.8
-	github.com/ltcmweb/ltcd v0.24.4-0.20240903164816-8fd403f1055e
+	github.com/ltcmweb/ltcd v0.25.0
 	github.com/ltcmweb/ltcd/chaincfg/chainhash v1.0.3
 	github.com/ltcmweb/neutrino v0.17.1
 	github.com/ltcsuite/ltcwallet/walletdb v1.3.5
