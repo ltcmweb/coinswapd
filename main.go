@@ -14,6 +14,7 @@ import (
 	"github.com/ltcmweb/coinswapd/onion"
 	"github.com/ltcmweb/ltcd/chaincfg"
 	"github.com/ltcmweb/ltcd/chaincfg/chainhash"
+	"github.com/ltcmweb/ltcd/ltcutil"
 	"github.com/ltcmweb/ltcd/ltcutil/mweb/mw"
 	"github.com/ltcmweb/ltcd/wire"
 	"github.com/ltcmweb/neutrino"
@@ -31,6 +32,9 @@ var (
 	nodeIndex = -1
 
 	port = flag.Int("l", 8080, "Listen port")
+
+	feeAddress     *mw.StealthAddress
+	feeAddressFlag = flag.String("a", "", "MWEB address to collect fees to")
 )
 
 func main() {
@@ -60,6 +64,12 @@ func main() {
 		fmt.Println("Public key not found in config")
 		return
 	}
+
+	addr, err := ltcutil.DecodeAddress(*feeAddressFlag, &chaincfg.MainNetParams)
+	if err != nil {
+		return
+	}
+	feeAddress = addr.(*ltcutil.AddressMweb).StealthAddress()
 
 	db, err = walletdb.Create("bdb", "neutrino.db", true, time.Minute)
 	if err != nil {

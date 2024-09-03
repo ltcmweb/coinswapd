@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/gob"
 	"maps"
 	"math/big"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ltcmweb/coinswapd/onion"
+	"github.com/ltcmweb/ltcd/ltcutil/mweb"
 	"github.com/ltcmweb/ltcd/ltcutil/mweb/mw"
+	"github.com/ltcmweb/ltcd/wire"
 )
 
 func (s *swapService) performSwap() error {
@@ -75,37 +78,39 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
 
 func (s *swapService) forward() error {
 	onions := s.peelOnions()
+
+	if nodeIndex == len(s.nodes)-1 {
+		return s.backward(nil)
+	}
+
 	commits := slices.SortedFunc(maps.Keys(onions), func(c1, c2 mw.Commitment) int {
 		a := new(big.Int).SetBytes(c1[:])
 		b := new(big.Int).SetBytes(c2[:])
 		return a.Cmp(b)
 	})
 
-	if nodeIndex+1 < len(s.nodes) {
-		node := s.nodes[nodeIndex+1]
-		pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
-		if err != nil {
-			return err
-		}
+	var data bytes.Buffer
+	enc := gob.NewEncoder(&data)
+	enc.Encode(commits)
+	for _, commit := range commits {
+		enc.Encode(onions[commit])
+	}
 
-		var data bytes.Buffer
-		enc := gob.NewEncoder(&data)
-		enc.Encode(len(commits))
-		for _, commit := range commits {
-			enc.Encode(commit)
-			enc.Encode(onions[commit])
-		}
+	node := s.nodes[nodeIndex+1]
+	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
+	if err != nil {
+		return err
+	}
 
-		cipher := onion.NewCipher(serverKey, pubKey)
-		cipher.XORKeyStream(data.Bytes(), data.Bytes())
+	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
-		client, err := rpc.Dial(node.Url)
-		if err != nil {
-			return err
-		}
-		if err := client.Call(nil, "swap_forward", data.Bytes()); err != nil {
-			return err
-		}
+	client, err := rpc.Dial(node.Url)
+	if err != nil {
+		return err
+	}
+	if err := client.Call(nil, "swap_forward", data.Bytes()); err != nil {
+		return err
 	}
 
 	return nil
@@ -126,18 +131,14 @@ func (s *swapService) Forward(data []byte) error {
 	cipher.XORKeyStream(data, data)
 
 	var (
-		count  int
-		commit mw.Commitment
-		onion  *onion.Onion
+		commits []mw.Commitment
+		onion   *onion.Onion
 	)
 	dec := gob.NewDecoder(bytes.NewReader(data))
-	if err = dec.Decode(&count); err != nil {
+	if err = dec.Decode(&commits); err != nil {
 		return err
 	}
-	for ; count > 0; count-- {
-		if err = dec.Decode(&commit); err != nil {
-			return err
-		}
+	for _, commit := range commits {
 		if err = dec.Decode(&onion); err != nil {
 			return err
 		}
@@ -145,4 +146,120 @@ func (s *swapService) Forward(data []byte) error {
 	}
 
 	return s.forward()
+}
+
+func (s *swapService) backward(kernels []*wire.MwebKernel) error {
+	var (
+		kernelBlind  mw.BlindingFactor
+		stealthBlind mw.BlindingFactor
+		senderKey    mw.SecretKey
+		nodeFee      uint64
+	)
+
+	for _, onion := range s.onions {
+		hop, _, _ := onion.Peel(serverKey)
+		kernelBlind = *kernelBlind.Add(&hop.KernelBlind)
+		stealthBlind = *stealthBlind.Add(&hop.StealthBlind)
+		nodeFee += hop.Fee
+	}
+
+	if _, err := rand.Read(senderKey[:]); err != nil {
+		return err
+	}
+	output, blind, _ := mweb.CreateOutput(&mweb.Recipient{
+		Value: nodeFee, Address: feeAddress}, &senderKey)
+	kernelBlind = *kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
+	stealthBlind = *stealthBlind.Add((*mw.BlindingFactor)(&senderKey))
+	s.outputs = append(s.outputs, output)
+
+	nOutputs := len(s.outputs) + nodeIndex
+	fee := uint64(nOutputs * mweb.StandardOutputWeight * mweb.BaseMwebFee / len(s.nodes))
+	fee += mweb.KernelWithStealthWeight*mweb.BaseMwebFee + 1
+
+	kernels = append(kernels, mweb.CreateKernel(
+		&kernelBlind, &stealthBlind, &fee, nil, nil, nil))
+
+	slices.SortFunc(s.outputs, func(o1, o2 *wire.MwebOutput) int {
+		a := new(big.Int).SetBytes(o1.Hash()[:])
+		b := new(big.Int).SetBytes(o2.Hash()[:])
+		return a.Cmp(b)
+	})
+
+	var data bytes.Buffer
+	enc := gob.NewEncoder(&data)
+	enc.Encode(slices.Collect(maps.Keys(s.onions)))
+	enc.Encode(len(s.outputs))
+	for _, output := range s.outputs {
+		output.Serialize(&data)
+	}
+	for _, kernel := range kernels {
+		kernel.Serialize(&data)
+	}
+
+	node := s.nodes[nodeIndex-1]
+	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
+	if err != nil {
+		return err
+	}
+
+	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher.XORKeyStream(data.Bytes(), data.Bytes())
+
+	client, err := rpc.Dial(node.Url)
+	if err != nil {
+		return err
+	}
+	if err := client.Call(nil, "swap_backward", data.Bytes()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *swapService) Backward(data []byte) error {
+	if nodeIndex == len(s.nodes)-1 {
+		return nil
+	}
+
+	node := s.nodes[nodeIndex+1]
+	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
+	if err != nil {
+		return err
+	}
+
+	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher.XORKeyStream(data, data)
+
+	var (
+		r       = bytes.NewReader(data)
+		dec     = gob.NewDecoder(r)
+		count   int
+		commits []mw.Commitment
+		kernels []*wire.MwebKernel
+	)
+
+	if err = dec.Decode(&commits); err != nil {
+		return err
+	}
+	if err = dec.Decode(&count); err != nil {
+		return err
+	}
+
+	for ; count > 0; count-- {
+		output := &wire.MwebOutput{}
+		if err = output.Deserialize(r); err != nil {
+			return err
+		}
+		s.outputs = append(s.outputs, output)
+	}
+
+	for i := nodeIndex + 1; i < len(s.nodes); i++ {
+		kernel := &wire.MwebKernel{}
+		if err = kernel.Deserialize(r); err != nil {
+			return err
+		}
+		kernels = append(kernels, kernel)
+	}
+
+	return s.backward(kernels)
 }
