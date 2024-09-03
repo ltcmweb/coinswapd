@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/gob"
+	"errors"
 	"maps"
 	"math/big"
 	"slices"
@@ -163,6 +164,11 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		nodeFee += hop.Fee
 	}
 
+	nOutputs := len(s.outputs) + nodeIndex + 1
+	fee := uint64(nOutputs * mweb.StandardOutputWeight * mweb.BaseMwebFee / len(s.nodes))
+	fee += mweb.KernelWithStealthWeight*mweb.BaseMwebFee + 1
+	nodeFee -= fee
+
 	if _, err := rand.Read(senderKey[:]); err != nil {
 		return err
 	}
@@ -171,10 +177,6 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 	kernelBlind = *kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
 	stealthBlind = *stealthBlind.Add((*mw.BlindingFactor)(&senderKey))
 	s.outputs = append(s.outputs, output)
-
-	nOutputs := len(s.outputs) + nodeIndex
-	fee := uint64(nOutputs * mweb.StandardOutputWeight * mweb.BaseMwebFee / len(s.nodes))
-	fee += mweb.KernelWithStealthWeight*mweb.BaseMwebFee + 1
 
 	kernels = append(kernels, mweb.CreateKernel(
 		&kernelBlind, &stealthBlind, &fee, nil, nil, nil))
@@ -231,11 +233,13 @@ func (s *swapService) Backward(data []byte) error {
 	cipher.XORKeyStream(data, data)
 
 	var (
-		r       = bytes.NewReader(data)
-		dec     = gob.NewDecoder(r)
-		count   int
-		commits []mw.Commitment
-		kernels []*wire.MwebKernel
+		r         = bytes.NewReader(data)
+		dec       = gob.NewDecoder(r)
+		count     int
+		commits   []mw.Commitment
+		kernels   []*wire.MwebKernel
+		commitSum mw.Commitment
+		kernelSum mw.Commitment
 	)
 
 	if err = dec.Decode(&commits); err != nil {
@@ -251,6 +255,7 @@ func (s *swapService) Backward(data []byte) error {
 			return err
 		}
 		s.outputs = append(s.outputs, output)
+		commitSum = *commitSum.Add(&output.Commitment)
 	}
 
 	for i := nodeIndex + 1; i < len(s.nodes); i++ {
@@ -259,6 +264,8 @@ func (s *swapService) Backward(data []byte) error {
 			return err
 		}
 		kernels = append(kernels, kernel)
+		kernelSum = *kernelSum.Add(&kernel.Excess).
+			Sub(mw.NewCommitment(&mw.BlindingFactor{}, kernel.Fee))
 	}
 
 	for commit, onion := range s.onions {
@@ -267,9 +274,15 @@ func (s *swapService) Backward(data []byte) error {
 		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
 
-		if !slices.Contains(commits, *commit2) {
+		if slices.Contains(commits, *commit2) {
+			commitSum = *commitSum.Sub(commit2)
+		} else {
 			delete(s.onions, commit)
 		}
+	}
+
+	if commitSum != kernelSum {
+		return errors.New("commit invariant not satisfied")
 	}
 
 	return s.backward(kernels)
