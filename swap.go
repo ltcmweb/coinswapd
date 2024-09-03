@@ -40,9 +40,34 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
 
 		if _, ok := onions[*commit2]; ok {
 			delete(s.onions, commit)
-		} else {
-			onions[*commit2] = onion
+			continue
 		}
+
+		lastNode := nodeIndex == len(s.nodes)-1
+		hasOutput := hop.Output != nil
+
+		if lastNode != hasOutput {
+			delete(s.onions, commit)
+			continue
+		}
+
+		if hasOutput {
+			var msg bytes.Buffer
+			hop.Output.Message.Serialize(&msg)
+
+			if *commit2 != hop.Output.Commitment ||
+				hop.Output.RangeProof == nil ||
+				!hop.Output.RangeProof.Verify(*commit2, msg.Bytes()) ||
+				!hop.Output.VerifySig() {
+
+				delete(s.onions, commit)
+				continue
+			}
+
+			s.outputs = append(s.outputs, hop.Output)
+		}
+
+		onions[*commit2] = onion
 	}
 
 	return onions

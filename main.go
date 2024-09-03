@@ -99,8 +99,9 @@ func main() {
 }
 
 type swapService struct {
-	nodes  []config.Node
-	onions map[mw.Commitment]*onion.Onion
+	nodes   []config.Node
+	onions  map[mw.Commitment]*onion.Onion
+	outputs []*wire.MwebOutput
 }
 
 func (s *swapService) Swap(onion onion.Onion) error {
