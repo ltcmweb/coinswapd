@@ -23,6 +23,9 @@ type onionEtc struct {
 }
 
 func (s *swapService) performSwap() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if nodeIndex != 0 {
 		return nil
 	}
@@ -127,6 +130,9 @@ func (s *swapService) forward() error {
 }
 
 func (s *swapService) Forward(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if nodeIndex == 0 {
 		return nil
 	}
@@ -234,10 +240,13 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		return err
 	}
 
-	return nil
+	return s.reset()
 }
 
 func (s *swapService) Backward(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if nodeIndex == len(s.nodes)-1 {
 		return nil
 	}
@@ -325,8 +334,14 @@ func (s *swapService) finalize(kernels []*wire.MwebKernel) error {
 		txBody.Inputs = append(txBody.Inputs, input)
 	}
 	txBody.Sort()
-	return cs.SendTransaction(&wire.MsgTx{
+
+	err := cs.SendTransaction(&wire.MsgTx{
 		Version: 2,
 		Mweb:    &wire.MwebTx{TxBody: txBody},
 	})
+	if err != nil {
+		return err
+	}
+
+	return s.reset()
 }

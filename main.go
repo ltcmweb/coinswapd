@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
@@ -50,18 +51,8 @@ func main() {
 	if err != nil {
 		return
 	}
-	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
-	fmt.Println("Public key =", pubKey)
-
-	nodes := config.AliveNodes(pubKey)
-	for i, node := range nodes {
-		if node.PubKey == pubKey {
-			fmt.Println("Node", i+1, "of", len(nodes))
-			nodeIndex = i
-		}
-	}
-	if nodeIndex < 0 {
-		fmt.Println("Public key not found in config")
+	nodes, err := getNodes()
+	if err != nil {
 		return
 	}
 
@@ -120,7 +111,7 @@ func main() {
 			height = height2
 		}
 
-		if !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
+		if nodeIndex == 0 && !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
 			fmt.Println("Performing swap")
 			if err = ss.performSwap(); err != nil {
 				return
@@ -130,13 +121,45 @@ func main() {
 	}
 }
 
+func getNodes() ([]config.Node, error) {
+	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
+	fmt.Println("Public key =", pubKey)
+
+	nodes := config.AliveNodes(pubKey)
+	for i, node := range nodes {
+		if node.PubKey == pubKey {
+			fmt.Println("Node", i+1, "of", len(nodes))
+			nodeIndex = i
+		}
+	}
+	if nodeIndex < 0 {
+		return nil, errors.New("public key not found in config")
+	}
+	return nodes, nil
+}
+
 type swapService struct {
+	mu      sync.Mutex
 	nodes   []config.Node
 	onions  map[mw.Commitment]*onionEtc
 	outputs []*wire.MwebOutput
 }
 
+func (s *swapService) reset() (err error) {
+	s.onions = nil
+	s.outputs = nil
+	clearOnions(db)
+	s.nodes, err = getNodes()
+	return
+}
+
 func (s *swapService) Swap(onion onion.Onion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if nodeIndex != 0 {
+		return errors.New("node index is not zero")
+	}
 	if err := validateOnion(&onion); err != nil {
 		return err
 	}
