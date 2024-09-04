@@ -298,7 +298,8 @@ func (s *swapService) Backward(data []byte) error {
 
 		if slices.Contains(commits, *commit2) {
 			commitSum = *commitSum.Sub(commit2)
-			stealthSum = *stealthSum.Sub(o.stealthSum)
+			stealthBlind := mw.SecretKey(hop.StealthBlind)
+			stealthSum = *stealthSum.Sub(o.stealthSum.Add(stealthBlind.PubKey()))
 		} else {
 			delete(s.onions, commit)
 		}
