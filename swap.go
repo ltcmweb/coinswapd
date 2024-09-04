@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"maps"
 	"math/big"
 	"slices"
@@ -90,6 +91,8 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onionEtc {
 }
 
 func (s *swapService) forward() error {
+	s.swapping = true
+
 	onions := s.peelOnions()
 
 	if nodeIndex == len(s.nodes)-1 {
@@ -122,9 +125,16 @@ func (s *swapService) forward() error {
 	if err != nil {
 		return err
 	}
-	if err := client.Call(nil, "swap_forward", data.Bytes()); err != nil {
-		return err
-	}
+
+	go func() {
+		err := client.Call(nil, "swap_forward", data.Bytes())
+		if err != nil {
+			fmt.Println("swap_forward:", err)
+			s.mu.Lock()
+			s.reset()
+			s.mu.Unlock()
+		}
+	}()
 
 	return nil
 }
@@ -133,6 +143,9 @@ func (s *swapService) Forward(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.swapping {
+		return errors.New("swapping already in progress")
+	}
 	if nodeIndex == 0 {
 		return nil
 	}
@@ -236,9 +249,13 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 	if err != nil {
 		return err
 	}
-	if err := client.Call(nil, "swap_backward", data.Bytes()); err != nil {
-		return err
-	}
+
+	go func() {
+		err := client.Call(nil, "swap_backward", data.Bytes())
+		if err != nil {
+			fmt.Println("swap_backward:", err)
+		}
+	}()
 
 	return s.reset()
 }
@@ -247,6 +264,9 @@ func (s *swapService) Backward(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !s.swapping {
+		return errors.New("swapping not in progress")
+	}
 	if nodeIndex == len(s.nodes)-1 {
 		return nil
 	}

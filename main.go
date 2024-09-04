@@ -139,15 +139,17 @@ func getNodes() ([]config.Node, error) {
 }
 
 type swapService struct {
-	mu      sync.Mutex
-	nodes   []config.Node
-	onions  map[mw.Commitment]*onionEtc
-	outputs []*wire.MwebOutput
+	mu       sync.Mutex
+	nodes    []config.Node
+	onions   map[mw.Commitment]*onionEtc
+	outputs  []*wire.MwebOutput
+	swapping bool
 }
 
 func (s *swapService) reset() (err error) {
 	s.onions = nil
 	s.outputs = nil
+	s.swapping = false
 	clearOnions(db)
 	s.nodes, err = getNodes()
 	return
@@ -157,6 +159,9 @@ func (s *swapService) Swap(onion onion.Onion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.swapping {
+		return errors.New("swapping in progress")
+	}
 	if nodeIndex != 0 {
 		return errors.New("node index is not zero")
 	}
