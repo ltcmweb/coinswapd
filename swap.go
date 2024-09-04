@@ -187,6 +187,10 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		return a.Cmp(b)
 	})
 
+	if nodeIndex == 0 {
+		return s.finalize(kernels)
+	}
+
 	var data bytes.Buffer
 	enc := gob.NewEncoder(&data)
 	enc.Encode(slices.Collect(maps.Keys(s.onions)))
@@ -286,4 +290,20 @@ func (s *swapService) Backward(data []byte) error {
 	}
 
 	return s.backward(kernels)
+}
+
+func (s *swapService) finalize(kernels []*wire.MwebKernel) error {
+	txBody := &wire.MwebTxBody{
+		Outputs: s.outputs,
+		Kernels: kernels,
+	}
+	for _, onion := range s.onions {
+		input, _ := inputFromOnion(onion)
+		txBody.Inputs = append(txBody.Inputs, input)
+	}
+	txBody.Sort()
+	return cs.SendTransaction(&wire.MsgTx{
+		Version: 2,
+		Mweb:    &wire.MwebTx{TxBody: txBody},
+	})
 }
