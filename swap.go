@@ -165,8 +165,10 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 	}
 
 	nOutputs := len(s.outputs) + nodeIndex + 1
-	fee := uint64(nOutputs * mweb.StandardOutputWeight * mweb.BaseMwebFee / len(s.nodes))
-	fee += mweb.KernelWithStealthWeight*mweb.BaseMwebFee + 1
+	nNodes := uint64(len(s.nodes))
+	fee := uint64(nOutputs) * mweb.StandardOutputWeight * mweb.BaseMwebFee
+	fee = (fee + nNodes - 1) / nNodes
+	fee += mweb.KernelWithStealthWeight * mweb.BaseMwebFee
 	nodeFee -= fee
 
 	if _, err := rand.Read(senderKey[:]); err != nil {
