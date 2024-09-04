@@ -169,6 +169,10 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 	fee := uint64(nOutputs) * mweb.StandardOutputWeight * mweb.BaseMwebFee
 	fee = (fee + nNodes - 1) / nNodes
 	fee += mweb.KernelWithStealthWeight * mweb.BaseMwebFee
+
+	if nodeFee < fee {
+		return errors.New("insufficient hop fees")
+	}
 	nodeFee -= fee
 
 	if _, err := rand.Read(senderKey[:]); err != nil {

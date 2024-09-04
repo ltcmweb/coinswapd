@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/ltcmweb/ltcd/ltcutil/mweb/mw"
 	"github.com/ltcmweb/ltcd/wire"
 	"golang.org/x/crypto/chacha20"
@@ -219,6 +220,14 @@ func (onion *Onion) Peel(privKey *ecdh.PrivateKey) (*Hop, *Onion, error) {
 	}
 	if err = binary.Read(r, binary.BigEndian, &hop.Fee); err != nil {
 		return nil, nil, err
+	}
+
+	var k secp256k1.ModNScalar
+	if k.SetBytes((*[32]byte)(&hop.KernelBlind)) > 0 {
+		return nil, nil, errors.New("hop kernel blind overflowed")
+	}
+	if k.SetBytes((*[32]byte)(&hop.StealthBlind)) > 0 {
+		return nil, nil, errors.New("hop stealth blind overflowed")
 	}
 
 	hasOutput, err := r.ReadByte()
