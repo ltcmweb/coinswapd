@@ -106,8 +106,12 @@ func main() {
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 
-	for height := uint32(0); ; <-time.After(2 * time.Second) {
-		_, height2, err := cs.BlockHeaders.ChainTip()
+	var (
+		height, height2 uint32
+		t, tPrev        time.Time
+	)
+	for ; ; t = <-time.After(2 * time.Second) {
+		_, height2, err = cs.BlockHeaders.ChainTip()
 		if err != nil {
 			return
 		}
@@ -115,6 +119,14 @@ func main() {
 			fmt.Println("Syncing height", height2)
 			height = height2
 		}
+
+		if !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
+			fmt.Println("Performing swap")
+			if err = ss.performSwap(); err != nil {
+				return
+			}
+		}
+		tPrev = t
 	}
 }
 
