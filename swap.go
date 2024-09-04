@@ -163,10 +163,13 @@ func (s *swapService) Forward(data []byte) error {
 		commits []mw.Commitment
 		onion   *onionEtc
 	)
+
 	dec := gob.NewDecoder(bytes.NewReader(data))
 	if err = dec.Decode(&commits); err != nil {
 		return err
 	}
+
+	s.onions = map[mw.Commitment]*onionEtc{}
 	for _, commit := range commits {
 		if err = dec.Decode(&onion); err != nil {
 			return err
