@@ -91,7 +91,7 @@ func main() {
 	server := rpc.NewServer()
 	server.RegisterName("swap", &swapService{
 		nodes:  nodes,
-		onions: map[mw.Commitment]*onion.Onion{},
+		onions: map[mw.Commitment]*onionEtc{},
 	})
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
@@ -110,16 +110,19 @@ func main() {
 
 type swapService struct {
 	nodes   []config.Node
-	onions  map[mw.Commitment]*onion.Onion
+	onions  map[mw.Commitment]*onionEtc
 	outputs []*wire.MwebOutput
 }
 
 func (s *swapService) Swap(onion onion.Onion) error {
-	commit, err := validateOnion(&onion)
-	if err != nil {
+	if err := validateOnion(&onion); err != nil {
 		return err
 	}
-	s.onions[*commit] = &onion
+	input, _ := inputFromOnion(&onion)
+	s.onions[input.Commitment] = &onionEtc{
+		onion:      &onion,
+		stealthSum: input.OutputPubKey.Sub(input.InputPubKey),
+	}
 	return nil
 }
 
@@ -135,30 +138,30 @@ func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
 	}, nil
 }
 
-func validateOnion(onion *onion.Onion) (*mw.Commitment, error) {
+func validateOnion(onion *onion.Onion) error {
 	input, err := inputFromOnion(onion)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	output, err := cs.MwebCoinDB.FetchCoin(&input.OutputId)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if input.Commitment != output.Commitment {
-		return nil, errors.New("commitment mismatch")
+		return errors.New("commitment mismatch")
 	}
 	if input.OutputPubKey != output.ReceiverPubKey {
-		return nil, errors.New("output pubkey mismatch")
+		return errors.New("output pubkey mismatch")
 	}
 
 	if !input.VerifySig() {
-		return nil, errors.New("verify input sig failed")
+		return errors.New("verify input sig failed")
 	}
 	if !onion.VerifySig() {
-		return nil, errors.New("verify onion sig failed")
+		return errors.New("verify onion sig failed")
 	}
 
-	return &input.Commitment, nil
+	return nil
 }

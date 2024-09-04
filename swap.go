@@ -17,23 +17,28 @@ import (
 	"github.com/ltcmweb/ltcd/wire"
 )
 
+type onionEtc struct {
+	onion      *onion.Onion
+	stealthSum *mw.PublicKey
+}
+
 func (s *swapService) performSwap() error {
 	if nodeIndex != 0 {
 		return nil
 	}
-	for commit, onion := range s.onions {
-		if _, err := validateOnion(onion); err != nil {
+	for commit, o := range s.onions {
+		if err := validateOnion(o.onion); err != nil {
 			delete(s.onions, commit)
 		}
 	}
 	return s.forward()
 }
 
-func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
-	onions := map[mw.Commitment]*onion.Onion{}
+func (s *swapService) peelOnions() map[mw.Commitment]*onionEtc {
+	onions := map[mw.Commitment]*onionEtc{}
 
-	for commit, onion := range s.onions {
-		hop, onion, err := onion.Peel(serverKey)
+	for commit, o := range s.onions {
+		hop, onion, err := o.onion.Peel(serverKey)
 		if err != nil {
 			delete(s.onions, commit)
 			continue
@@ -41,6 +46,9 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
 
 		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
+
+		stealthBlind := mw.SecretKey(hop.StealthBlind)
+		stealthSum := o.stealthSum.Add(stealthBlind.PubKey())
 
 		if _, ok := onions[*commit2]; ok {
 			delete(s.onions, commit)
@@ -60,6 +68,7 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
 			hop.Output.Message.Serialize(&msg)
 
 			if *commit2 != hop.Output.Commitment ||
+				*stealthSum != hop.Output.SenderPubKey ||
 				hop.Output.RangeProof == nil ||
 				!hop.Output.RangeProof.Verify(*commit2, msg.Bytes()) ||
 				!hop.Output.VerifySig() {
@@ -71,7 +80,7 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onion.Onion {
 			s.outputs = append(s.outputs, hop.Output)
 		}
 
-		onions[*commit2] = onion
+		onions[*commit2] = &onionEtc{onion, stealthSum}
 	}
 
 	return onions
@@ -133,7 +142,7 @@ func (s *swapService) Forward(data []byte) error {
 
 	var (
 		commits []mw.Commitment
-		onion   *onion.Onion
+		onion   *onionEtc
 	)
 	dec := gob.NewDecoder(bytes.NewReader(data))
 	if err = dec.Decode(&commits); err != nil {
@@ -157,8 +166,8 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		nodeFee      uint64
 	)
 
-	for _, onion := range s.onions {
-		hop, _, _ := onion.Peel(serverKey)
+	for _, o := range s.onions {
+		hop, _, _ := o.onion.Peel(serverKey)
 		kernelBlind = *kernelBlind.Add(&hop.KernelBlind)
 		stealthBlind = *stealthBlind.Add(&hop.StealthBlind)
 		nodeFee += hop.Fee
@@ -243,13 +252,14 @@ func (s *swapService) Backward(data []byte) error {
 	cipher.XORKeyStream(data, data)
 
 	var (
-		r         = bytes.NewReader(data)
-		dec       = gob.NewDecoder(r)
-		count     int
-		commits   []mw.Commitment
-		kernels   []*wire.MwebKernel
-		commitSum mw.Commitment
-		kernelSum mw.Commitment
+		r       = bytes.NewReader(data)
+		dec     = gob.NewDecoder(r)
+		count   int
+		commits []mw.Commitment
+		kernels []*wire.MwebKernel
+
+		commitSum, kernelExcess   mw.Commitment
+		stealthSum, stealthExcess mw.PublicKey
 	)
 
 	if err = dec.Decode(&commits); err != nil {
@@ -266,6 +276,7 @@ func (s *swapService) Backward(data []byte) error {
 		}
 		s.outputs = append(s.outputs, output)
 		commitSum = *commitSum.Add(&output.Commitment)
+		stealthSum = *stealthSum.Add(&output.SenderPubKey)
 	}
 
 	for i := nodeIndex + 1; i < len(s.nodes); i++ {
@@ -274,25 +285,30 @@ func (s *swapService) Backward(data []byte) error {
 			return err
 		}
 		kernels = append(kernels, kernel)
-		kernelSum = *kernelSum.Add(&kernel.Excess).
+		kernelExcess = *kernelExcess.Add(&kernel.Excess).
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, kernel.Fee))
+		stealthExcess = *stealthExcess.Add(&kernel.StealthExcess)
 	}
 
-	for commit, onion := range s.onions {
-		hop, _, _ := onion.Peel(serverKey)
+	for commit, o := range s.onions {
+		hop, _, _ := o.onion.Peel(serverKey)
 
 		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
 
 		if slices.Contains(commits, *commit2) {
 			commitSum = *commitSum.Sub(commit2)
+			stealthSum = *stealthSum.Sub(o.stealthSum)
 		} else {
 			delete(s.onions, commit)
 		}
 	}
 
-	if commitSum != kernelSum {
+	if commitSum != kernelExcess {
 		return errors.New("commit invariant not satisfied")
+	}
+	if stealthSum != stealthExcess {
+		return errors.New("stealth invariant not satisfied")
 	}
 
 	return s.backward(kernels)
@@ -303,8 +319,8 @@ func (s *swapService) finalize(kernels []*wire.MwebKernel) error {
 		Outputs: s.outputs,
 		Kernels: kernels,
 	}
-	for _, onion := range s.onions {
-		input, _ := inputFromOnion(onion)
+	for _, o := range s.onions {
+		input, _ := inputFromOnion(o.onion)
 		txBody.Inputs = append(txBody.Inputs, input)
 	}
 	txBody.Sort()
