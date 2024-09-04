@@ -147,7 +147,7 @@ type swapService struct {
 }
 
 func (s *swapService) reset() (err error) {
-	s.onions = nil
+	s.onions = map[mw.Commitment]*onionEtc{}
 	s.outputs = nil
 	s.swapping = false
 	clearOnions(db)
