@@ -88,11 +88,21 @@ func main() {
 		return
 	}
 
-	server := rpc.NewServer()
-	server.RegisterName("swap", &swapService{
+	ss := &swapService{
 		nodes:  nodes,
 		onions: map[mw.Commitment]*onionEtc{},
-	})
+	}
+
+	onions, err := loadOnions(db)
+	if err != nil {
+		return
+	}
+	for _, onion := range onions {
+		ss.addOnion(onion)
+	}
+
+	server := rpc.NewServer()
+	server.RegisterName("swap", ss)
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 
@@ -118,12 +128,19 @@ func (s *swapService) Swap(onion onion.Onion) error {
 	if err := validateOnion(&onion); err != nil {
 		return err
 	}
-	input, _ := inputFromOnion(&onion)
+	if err := saveOnion(db, &onion); err != nil {
+		return err
+	}
+	s.addOnion(&onion)
+	return nil
+}
+
+func (s *swapService) addOnion(onion *onion.Onion) {
+	input, _ := inputFromOnion(onion)
 	s.onions[input.Commitment] = &onionEtc{
-		onion:      &onion,
+		onion:      onion,
 		stealthSum: input.OutputPubKey.Sub(input.InputPubKey),
 	}
-	return nil
 }
 
 func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {
