@@ -23,7 +23,7 @@ func (node Node) PubKey() *ecdh.PublicKey {
 
 func AliveNodes(ctx context.Context, pubKey *ecdh.PublicKey) (nodes []Node) {
 	for _, node := range Nodes {
-		if node.PubKey().Equal(pubKey) {
+		if pubKey != nil && node.PubKey().Equal(pubKey) {
 			nodes = append(nodes, node)
 			continue
 		}
