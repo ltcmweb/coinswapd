@@ -37,6 +37,8 @@ var (
 
 	feeAddress     *mw.StealthAddress
 	feeAddressFlag = flag.String("a", "", "MWEB address to collect fees to")
+
+	forceSwap = flag.Bool("f", false, "Force-run a swap at startup")
 )
 
 func main() {
@@ -98,6 +100,12 @@ func main() {
 	http.HandleFunc("/", server.ServeHTTP)
 	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
 
+	if *forceSwap {
+		if err = ss.performSwap(); err != nil {
+			return
+		}
+	}
+
 	var (
 		height, height2 uint32
 		t, tPrev        time.Time
@@ -112,8 +120,7 @@ func main() {
 			height = height2
 		}
 
-		if nodeIndex == 0 && !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
-			fmt.Println("Performing swap")
+		if !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
 			if err = ss.performSwap(); err != nil {
 				return
 			}

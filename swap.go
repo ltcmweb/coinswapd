@@ -30,6 +30,8 @@ func (s *swapService) performSwap() error {
 	if nodeIndex != 0 {
 		return nil
 	}
+	fmt.Println("Performing swap")
+
 	for commit, o := range s.onions {
 		if err := validateOnion(o.onion); err != nil {
 			delete(s.onions, commit)
