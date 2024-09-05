@@ -18,8 +18,8 @@ import (
 )
 
 type onionEtc struct {
-	onion      *onion.Onion
-	stealthSum *mw.PublicKey
+	Onion      *onion.Onion
+	StealthSum *mw.PublicKey
 }
 
 func (s *swapService) performSwap() error {
@@ -47,8 +47,8 @@ func (s *swapService) performSwap() error {
 
 		input, _ := inputFromOnion(onion)
 		s.onions[input.Commitment] = &onionEtc{
-			onion:      onion,
-			stealthSum: input.OutputPubKey.Sub(input.InputPubKey),
+			Onion:      onion,
+			StealthSum: input.OutputPubKey.Sub(input.InputPubKey),
 		}
 	}
 
@@ -62,7 +62,7 @@ func (s *swapService) peelOnions() (
 	onions = map[mw.Commitment]*onionEtc{}
 
 	for commit, o := range s.onions {
-		hop, onion, err := o.onion.Peel(serverKey)
+		hop, onion, err := o.Onion.Peel(serverKey)
 		if err != nil {
 			delete(s.onions, commit)
 			continue
@@ -72,7 +72,7 @@ func (s *swapService) peelOnions() (
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
 
 		stealthBlind := mw.SecretKey(hop.StealthBlind)
-		stealthSum := o.stealthSum.Add(stealthBlind.PubKey())
+		stealthSum := o.StealthSum.Add(stealthBlind.PubKey())
 
 		if _, ok := onions[*commit2]; ok {
 			delete(s.onions, commit)
@@ -194,7 +194,7 @@ func (s *swapService) backward(
 	)
 
 	for _, o := range s.onions {
-		hop, _, _ := o.onion.Peel(serverKey)
+		hop, _, _ := o.Onion.Peel(serverKey)
 		kernelBlind = *kernelBlind.Add(&hop.KernelBlind)
 		stealthBlind = *stealthBlind.Add(&hop.StealthBlind)
 		nodeFee += hop.Fee
@@ -316,7 +316,7 @@ func (s *swapService) Backward(data []byte) error {
 	}
 
 	for commit, o := range s.onions {
-		hop, _, _ := o.onion.Peel(serverKey)
+		hop, _, _ := o.Onion.Peel(serverKey)
 
 		commit2 := commit.Add(mw.NewCommitment(&hop.KernelBlind, 0)).
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
@@ -324,7 +324,7 @@ func (s *swapService) Backward(data []byte) error {
 		if slices.Contains(commits, *commit2) {
 			commitSum = *commitSum.Sub(commit2)
 			stealthBlind := mw.SecretKey(hop.StealthBlind)
-			stealthSum = *stealthSum.Sub(o.stealthSum.Add(stealthBlind.PubKey()))
+			stealthSum = *stealthSum.Sub(o.StealthSum.Add(stealthBlind.PubKey()))
 		} else {
 			delete(s.onions, commit)
 		}
@@ -349,7 +349,7 @@ func (s *swapService) finalize(
 		Kernels: kernels,
 	}
 	for _, o := range s.onions {
-		input, _ := inputFromOnion(o.onion)
+		input, _ := inputFromOnion(o.Onion)
 		txBody.Inputs = append(txBody.Inputs, input)
 	}
 	txBody.Sort()
