@@ -31,8 +31,6 @@ var (
 	serverKey     *ecdh.PrivateKey
 	serverKeyFlag = flag.String("k", "", "ECDH private key")
 
-	nodeIndex = -1
-
 	port = flag.Int("l", 8080, "Listen port")
 
 	feeAddress     *mw.StealthAddress
@@ -55,10 +53,6 @@ func main() {
 		return
 	}
 	serverKey, err = ecdh.X25519().NewPrivateKey(serverKeyBytes)
-	if err != nil {
-		return
-	}
-	nodes, err := getNodes()
 	if err != nil {
 		return
 	}
@@ -86,17 +80,9 @@ func main() {
 		return
 	}
 
-	ss := &swapService{
-		nodes:  nodes,
-		onions: map[mw.Commitment]*onionEtc{},
-	}
-
-	onions, err := loadOnions(db)
-	if err != nil {
+	ss := &swapService{}
+	if err = ss.getNodes(); err != nil {
 		return
-	}
-	for _, onion := range onions {
-		ss.addOnion(onion)
 	}
 
 	rpcServer := rpc.NewServer()
@@ -119,7 +105,7 @@ func main() {
 		height, height2 uint32
 		t, tPrev        time.Time
 	)
-	for ; ; t = <-time.After(2 * time.Second) {
+	for ; ; t, tPrev = (<-time.After(2 * time.Second)).UTC(), t {
 		_, height2, err = cs.BlockHeaders.ChainTip()
 		if err != nil {
 			return
@@ -129,75 +115,58 @@ func main() {
 			height = height2
 		}
 
-		if !tPrev.IsZero() && tPrev.Hour() > t.Hour() {
-			if err = ss.performSwap(); err != nil {
-				return
-			}
+		switch {
+		case tPrev.Hour() == 23 && t.Hour() == 0:
+			err = ss.performSwap()
+		case tPrev.Hour() == 0 && t.Hour() == 1:
+			err = ss.getNodes()
 		}
-		tPrev = t
-	}
-}
-
-func getNodes() ([]config.Node, error) {
-	pubKey := serverKey.PublicKey()
-	fmt.Println("Public key =", hex.EncodeToString(pubKey.Bytes()))
-
-	nodes := config.AliveNodes(context.Background(), pubKey)
-	for i, node := range nodes {
-		if node.PubKey().Equal(pubKey) {
-			fmt.Println("Node", i+1, "of", len(nodes))
-			nodeIndex = i
+		if err != nil {
+			return
 		}
 	}
-	if nodeIndex < 0 {
-		return nil, errors.New("public key not found in config")
-	}
-	return nodes, nil
 }
 
 type swapService struct {
-	mu       sync.Mutex
-	nodes    []config.Node
-	onions   map[mw.Commitment]*onionEtc
-	outputs  []*wire.MwebOutput
-	swapping bool
+	mu        sync.Mutex
+	nodes     []config.Node
+	nodeIndex int
+	onions    map[mw.Commitment]*onionEtc
 }
 
-func (s *swapService) reset() (err error) {
-	s.onions = map[mw.Commitment]*onionEtc{}
-	s.outputs = nil
-	s.swapping = false
-	clearOnions(db)
-	s.nodes, err = getNodes()
-	return
+func (s *swapService) getNodes() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pubKey := serverKey.PublicKey()
+	fmt.Println("Public key =", hex.EncodeToString(pubKey.Bytes()))
+
+	s.nodes = config.AliveNodes(context.Background(), pubKey)
+	s.nodeIndex = -1
+
+	for i, node := range s.nodes {
+		if node.PubKey().Equal(pubKey) {
+			fmt.Println("Node", i+1, "of", len(s.nodes))
+			s.nodeIndex = i
+		}
+	}
+	if s.nodeIndex < 0 {
+		return errors.New("public key not found in config")
+	}
+	return nil
 }
 
 func (s *swapService) Swap(onion onion.Onion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.swapping {
-		return errors.New("swapping in progress")
-	}
-	if nodeIndex != 0 {
+	if s.nodeIndex != 0 {
 		return errors.New("node index is not zero")
 	}
 	if err := validateOnion(&onion); err != nil {
 		return err
 	}
-	if err := saveOnion(db, &onion); err != nil {
-		return err
-	}
-	s.addOnion(&onion)
-	return nil
-}
-
-func (s *swapService) addOnion(onion *onion.Onion) {
-	input, _ := inputFromOnion(onion)
-	s.onions[input.Commitment] = &onionEtc{
-		onion:      onion,
-		stealthSum: input.OutputPubKey.Sub(input.InputPubKey),
-	}
+	return saveOnion(db, &onion)
 }
 
 func inputFromOnion(onion *onion.Onion) (input *wire.MwebInput, err error) {

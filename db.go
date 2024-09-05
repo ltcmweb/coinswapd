@@ -40,9 +40,12 @@ func loadOnions(db walletdb.DB) (onions []*onion.Onion, err error) {
 	return
 }
 
-func clearOnions(db walletdb.DB) error {
+func deleteOnion(db walletdb.DB, onion *onion.Onion) error {
 	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
-		tx.DeleteTopLevelBucket(coinswapOnionsBucket)
-		return nil
+		bucket := tx.ReadWriteBucket(coinswapOnionsBucket)
+		if bucket == nil {
+			return nil
+		}
+		return bucket.Delete(onion.Input.Commitment)
 	})
 }

@@ -26,21 +26,40 @@ func (s *swapService) performSwap() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if nodeIndex != 0 {
+	if s.nodeIndex != 0 {
 		return nil
 	}
 	fmt.Println("Performing swap")
 
-	for commit, o := range s.onions {
-		if err := validateOnion(o.onion); err != nil {
-			delete(s.onions, commit)
+	onions, err := loadOnions(db)
+	if err != nil {
+		return err
+	}
+
+	s.onions = map[mw.Commitment]*onionEtc{}
+	for _, onion := range onions {
+		if err = validateOnion(onion); err != nil {
+			if err = deleteOnion(db, onion); err != nil {
+				return err
+			}
+			continue
+		}
+
+		input, _ := inputFromOnion(onion)
+		s.onions[input.Commitment] = &onionEtc{
+			onion:      onion,
+			stealthSum: input.OutputPubKey.Sub(input.InputPubKey),
 		}
 	}
+
 	return s.forward()
 }
 
-func (s *swapService) peelOnions() map[mw.Commitment]*onionEtc {
-	onions := map[mw.Commitment]*onionEtc{}
+func (s *swapService) peelOnions() (
+	onions map[mw.Commitment]*onionEtc,
+	outputs []*wire.MwebOutput) {
+
+	onions = map[mw.Commitment]*onionEtc{}
 
 	for commit, o := range s.onions {
 		hop, onion, err := o.onion.Peel(serverKey)
@@ -60,7 +79,7 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onionEtc {
 			continue
 		}
 
-		lastNode := nodeIndex == len(s.nodes)-1
+		lastNode := s.nodeIndex == len(s.nodes)-1
 		hasOutput := hop.Output != nil
 
 		if lastNode != hasOutput {
@@ -82,22 +101,20 @@ func (s *swapService) peelOnions() map[mw.Commitment]*onionEtc {
 				continue
 			}
 
-			s.outputs = append(s.outputs, hop.Output)
+			outputs = append(outputs, hop.Output)
 		}
 
 		onions[*commit2] = &onionEtc{onion, stealthSum}
 	}
 
-	return onions
+	return
 }
 
 func (s *swapService) forward() error {
-	s.swapping = true
+	onions, outputs := s.peelOnions()
 
-	onions := s.peelOnions()
-
-	if nodeIndex == len(s.nodes)-1 {
-		return s.backward(nil)
+	if s.nodeIndex == len(s.nodes)-1 {
+		return s.backward(outputs, nil)
 	}
 
 	commits := slices.SortedFunc(maps.Keys(onions), func(c1, c2 mw.Commitment) int {
@@ -113,7 +130,7 @@ func (s *swapService) forward() error {
 		enc.Encode(onions[commit])
 	}
 
-	node := s.nodes[nodeIndex+1]
+	node := s.nodes[s.nodeIndex+1]
 	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
@@ -126,9 +143,6 @@ func (s *swapService) forward() error {
 		err := client.Call(nil, "swap_forward", data.Bytes())
 		if err != nil {
 			fmt.Println("swap_forward:", err)
-			s.mu.Lock()
-			s.reset()
-			s.mu.Unlock()
 		}
 	}()
 
@@ -139,14 +153,11 @@ func (s *swapService) Forward(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.swapping {
-		return errors.New("swapping already in progress")
-	}
-	if nodeIndex == 0 {
+	if s.nodeIndex == 0 {
 		return nil
 	}
 
-	node := s.nodes[nodeIndex-1]
+	node := s.nodes[s.nodeIndex-1]
 	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data, data)
 
@@ -171,7 +182,10 @@ func (s *swapService) Forward(data []byte) error {
 	return s.forward()
 }
 
-func (s *swapService) backward(kernels []*wire.MwebKernel) error {
+func (s *swapService) backward(
+	outputs []*wire.MwebOutput,
+	kernels []*wire.MwebKernel) error {
+
 	var (
 		kernelBlind  mw.BlindingFactor
 		stealthBlind mw.BlindingFactor
@@ -186,7 +200,7 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		nodeFee += hop.Fee
 	}
 
-	nOutputs := len(s.outputs) + nodeIndex + 1
+	nOutputs := len(outputs) + s.nodeIndex + 1
 	nNodes := uint64(len(s.nodes))
 	fee := uint64(nOutputs) * mweb.StandardOutputWeight * mweb.BaseMwebFee
 	fee = (fee + nNodes - 1) / nNodes
@@ -204,33 +218,33 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		Value: nodeFee, Address: feeAddress}, &senderKey)
 	kernelBlind = *kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
 	stealthBlind = *stealthBlind.Add((*mw.BlindingFactor)(&senderKey))
-	s.outputs = append(s.outputs, output)
+	outputs = append(outputs, output)
 
 	kernels = append(kernels, mweb.CreateKernel(
 		&kernelBlind, &stealthBlind, &fee, nil, nil, nil))
 
-	slices.SortFunc(s.outputs, func(o1, o2 *wire.MwebOutput) int {
+	slices.SortFunc(outputs, func(o1, o2 *wire.MwebOutput) int {
 		a := new(big.Int).SetBytes(o1.Hash()[:])
 		b := new(big.Int).SetBytes(o2.Hash()[:])
 		return a.Cmp(b)
 	})
 
-	if nodeIndex == 0 {
-		return s.finalize(kernels)
+	if s.nodeIndex == 0 {
+		return s.finalize(outputs, kernels)
 	}
 
 	var data bytes.Buffer
 	enc := gob.NewEncoder(&data)
 	enc.Encode(slices.Collect(maps.Keys(s.onions)))
-	enc.Encode(len(s.outputs))
-	for _, output := range s.outputs {
+	enc.Encode(len(outputs))
+	for _, output := range outputs {
 		output.Serialize(&data)
 	}
 	for _, kernel := range kernels {
 		kernel.Serialize(&data)
 	}
 
-	node := s.nodes[nodeIndex-1]
+	node := s.nodes[s.nodeIndex-1]
 	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
@@ -246,21 +260,18 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 		}
 	}()
 
-	return s.reset()
+	return nil
 }
 
 func (s *swapService) Backward(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.swapping {
-		return errors.New("swapping not in progress")
-	}
-	if nodeIndex == len(s.nodes)-1 {
+	if s.nodeIndex == len(s.nodes)-1 {
 		return nil
 	}
 
-	node := s.nodes[nodeIndex+1]
+	node := s.nodes[s.nodeIndex+1]
 	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data, data)
 
@@ -269,6 +280,7 @@ func (s *swapService) Backward(data []byte) error {
 		dec     = gob.NewDecoder(r)
 		count   int
 		commits []mw.Commitment
+		outputs []*wire.MwebOutput
 		kernels []*wire.MwebKernel
 
 		commitSum, kernelExcess   mw.Commitment
@@ -287,12 +299,12 @@ func (s *swapService) Backward(data []byte) error {
 		if err := output.Deserialize(r); err != nil {
 			return err
 		}
-		s.outputs = append(s.outputs, output)
+		outputs = append(outputs, output)
 		commitSum = *commitSum.Add(&output.Commitment)
 		stealthSum = *stealthSum.Add(&output.SenderPubKey)
 	}
 
-	for i := nodeIndex + 1; i < len(s.nodes); i++ {
+	for i := s.nodeIndex + 1; i < len(s.nodes); i++ {
 		kernel := &wire.MwebKernel{}
 		if err := kernel.Deserialize(r); err != nil {
 			return err
@@ -325,12 +337,15 @@ func (s *swapService) Backward(data []byte) error {
 		return errors.New("stealth invariant not satisfied")
 	}
 
-	return s.backward(kernels)
+	return s.backward(outputs, kernels)
 }
 
-func (s *swapService) finalize(kernels []*wire.MwebKernel) error {
+func (s *swapService) finalize(
+	outputs []*wire.MwebOutput,
+	kernels []*wire.MwebKernel) error {
+
 	txBody := &wire.MwebTxBody{
-		Outputs: s.outputs,
+		Outputs: outputs,
 		Kernels: kernels,
 	}
 	for _, o := range s.onions {
@@ -339,13 +354,8 @@ func (s *swapService) finalize(kernels []*wire.MwebKernel) error {
 	}
 	txBody.Sort()
 
-	err := cs.SendTransaction(&wire.MsgTx{
+	return cs.SendTransaction(&wire.MsgTx{
 		Version: 2,
 		Mweb:    &wire.MwebTx{TxBody: txBody},
 	})
-	if err != nil {
-		return err
-	}
-
-	return s.reset()
 }
