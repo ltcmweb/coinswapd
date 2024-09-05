@@ -99,10 +99,15 @@ func main() {
 		ss.addOnion(onion)
 	}
 
-	server := rpc.NewServer()
-	server.RegisterName("swap", ss)
-	http.HandleFunc("/", server.ServeHTTP)
-	go http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
+	rpcServer := rpc.NewServer()
+	rpcServer.RegisterName("swap", ss)
+	http.HandleFunc("/", rpcServer.ServeHTTP)
+	httpServer := &http.Server{
+		Addr:         fmt.Sprintf(":%d", *port),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+	go httpServer.ListenAndServe()
 
 	if *forceSwap {
 		if err = ss.performSwap(); err != nil {
