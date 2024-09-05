@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdh"
 	"encoding/hex"
 	"errors"
@@ -125,7 +126,7 @@ func getNodes() ([]config.Node, error) {
 	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
 	fmt.Println("Public key =", pubKey)
 
-	nodes := config.AliveNodes(pubKey)
+	nodes := config.AliveNodes(context.Background(), pubKey)
 	for i, node := range nodes {
 		if node.PubKey == pubKey {
 			fmt.Println("Node", i+1, "of", len(nodes))

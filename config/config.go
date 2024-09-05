@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-func AliveNodes(pubKey string) (nodes []Node) {
+func AliveNodes(ctx context.Context, pubKey string) (nodes []Node) {
 	for _, node := range Nodes {
 		if node.PubKey == pubKey {
 			nodes = append(nodes, node)
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		req, _ := http.NewRequestWithContext(ctx, "GET", node.Url, nil)
 		fmt.Print("Checking node ", node.Url, "...")
 		if _, err := http.DefaultClient.Do(req); err == nil {
