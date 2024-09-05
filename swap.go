@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/gob"
 	"errors"
@@ -115,12 +114,7 @@ func (s *swapService) forward() error {
 	}
 
 	node := s.nodes[nodeIndex+1]
-	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
-	if err != nil {
-		return err
-	}
-
-	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
 	client, err := rpc.Dial(node.Url)
@@ -153,12 +147,7 @@ func (s *swapService) Forward(data []byte) error {
 	}
 
 	node := s.nodes[nodeIndex-1]
-	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
-	if err != nil {
-		return err
-	}
-
-	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data, data)
 
 	var (
@@ -167,13 +156,13 @@ func (s *swapService) Forward(data []byte) error {
 	)
 
 	dec := gob.NewDecoder(bytes.NewReader(data))
-	if err = dec.Decode(&commits); err != nil {
+	if err := dec.Decode(&commits); err != nil {
 		return err
 	}
 
 	s.onions = map[mw.Commitment]*onionEtc{}
 	for _, commit := range commits {
-		if err = dec.Decode(&onion); err != nil {
+		if err := dec.Decode(&onion); err != nil {
 			return err
 		}
 		s.onions[commit] = onion
@@ -242,12 +231,7 @@ func (s *swapService) backward(kernels []*wire.MwebKernel) error {
 	}
 
 	node := s.nodes[nodeIndex-1]
-	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
-	if err != nil {
-		return err
-	}
-
-	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
 	client, err := rpc.Dial(node.Url)
@@ -277,12 +261,7 @@ func (s *swapService) Backward(data []byte) error {
 	}
 
 	node := s.nodes[nodeIndex+1]
-	pubKey, err := ecdh.X25519().NewPublicKey([]byte(node.PubKey))
-	if err != nil {
-		return err
-	}
-
-	cipher := onion.NewCipher(serverKey, pubKey)
+	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data, data)
 
 	var (
@@ -296,16 +275,16 @@ func (s *swapService) Backward(data []byte) error {
 		stealthSum, stealthExcess mw.PublicKey
 	)
 
-	if err = dec.Decode(&commits); err != nil {
+	if err := dec.Decode(&commits); err != nil {
 		return err
 	}
-	if err = dec.Decode(&count); err != nil {
+	if err := dec.Decode(&count); err != nil {
 		return err
 	}
 
 	for ; count > 0; count-- {
 		output := &wire.MwebOutput{}
-		if err = output.Deserialize(r); err != nil {
+		if err := output.Deserialize(r); err != nil {
 			return err
 		}
 		s.outputs = append(s.outputs, output)
@@ -315,7 +294,7 @@ func (s *swapService) Backward(data []byte) error {
 
 	for i := nodeIndex + 1; i < len(s.nodes); i++ {
 		kernel := &wire.MwebKernel{}
-		if err = kernel.Deserialize(r); err != nil {
+		if err := kernel.Deserialize(r); err != nil {
 			return err
 		}
 		kernels = append(kernels, kernel)

@@ -50,7 +50,11 @@ func main() {
 	}()
 
 	flag.Parse()
-	serverKey, err = ecdh.X25519().NewPrivateKey([]byte(*serverKeyFlag))
+	serverKeyBytes, err := hex.DecodeString(*serverKeyFlag)
+	if err != nil {
+		return
+	}
+	serverKey, err = ecdh.X25519().NewPrivateKey(serverKeyBytes)
 	if err != nil {
 		return
 	}
@@ -130,12 +134,12 @@ func main() {
 }
 
 func getNodes() ([]config.Node, error) {
-	pubKey := hex.EncodeToString(serverKey.PublicKey().Bytes())
-	fmt.Println("Public key =", pubKey)
+	pubKey := serverKey.PublicKey()
+	fmt.Println("Public key =", hex.EncodeToString(pubKey.Bytes()))
 
 	nodes := config.AliveNodes(context.Background(), pubKey)
 	for i, node := range nodes {
-		if node.PubKey == pubKey {
+		if node.PubKey().Equal(pubKey) {
 			fmt.Println("Node", i+1, "of", len(nodes))
 			nodeIndex = i
 		}
