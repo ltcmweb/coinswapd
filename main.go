@@ -65,11 +65,20 @@ func main() {
 		return
 	}
 
+	if *feeAddressFlag == "" {
+		err = errors.New("MWEB address for fee collection is required")
+		return
+	}
 	addr, err := ltcutil.DecodeAddress(*feeAddressFlag, &chaincfg.MainNetParams)
 	if err != nil {
 		return
 	}
-	feeAddress = addr.(*ltcutil.AddressMweb).StealthAddress()
+	if addr, ok := addr.(*ltcutil.AddressMweb); ok {
+		feeAddress = addr.StealthAddress()
+	} else {
+		err = errors.New("must be an MWEB address")
+		return
+	}
 
 	db, err = walletdb.Create("bdb", "neutrino.db", true, time.Minute)
 	if err != nil {

@@ -28,9 +28,9 @@ func AliveNodes(ctx context.Context, pubKey *ecdh.PublicKey) (nodes []Node) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		req, _ := http.NewRequestWithContext(ctx, "GET", node.Url, nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, node.Url, nil)
 		fmt.Print("Checking node ", node.Url, "...")
-		if _, err := http.DefaultClient.Do(req); err == nil {
+		if resp, err := http.DefaultClient.Do(req); err == nil && resp.StatusCode == 200 {
 			nodes = append(nodes, node)
 			fmt.Println(" ok")
 		} else {
