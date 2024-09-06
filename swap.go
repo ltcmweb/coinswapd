@@ -161,11 +161,7 @@ func (s *swapService) Forward(data []byte) error {
 	cipher := onion.NewCipher(serverKey, node.PubKey())
 	cipher.XORKeyStream(data, data)
 
-	var (
-		commits []mw.Commitment
-		onion   *onionEtc
-	)
-
+	var commits []mw.Commitment
 	dec := gob.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&commits); err != nil {
 		return err
@@ -173,6 +169,7 @@ func (s *swapService) Forward(data []byte) error {
 
 	s.onions = map[mw.Commitment]*onionEtc{}
 	for _, commit := range commits {
+		var onion *onionEtc
 		if err := dec.Decode(&onion); err != nil {
 			return err
 		}
@@ -216,6 +213,7 @@ func (s *swapService) backward(
 	}
 	output, blind, _ := mweb.CreateOutput(&mweb.Recipient{
 		Value: nodeFee, Address: feeAddress}, &senderKey)
+	mweb.SignOutput(output, nodeFee, blind, &senderKey)
 	kernelBlind = *kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
 	stealthBlind = *stealthBlind.Add((*mw.BlindingFactor)(&senderKey))
 	outputs = append(outputs, output)
@@ -283,8 +281,8 @@ func (s *swapService) Backward(data []byte) error {
 		outputs []*wire.MwebOutput
 		kernels []*wire.MwebKernel
 
-		commitSum, kernelExcess   mw.Commitment
-		stealthSum, stealthExcess mw.PublicKey
+		commitSum, kernelExcess   *mw.Commitment
+		stealthSum, stealthExcess *mw.PublicKey
 	)
 
 	if err := dec.Decode(&commits); err != nil {
@@ -300,8 +298,14 @@ func (s *swapService) Backward(data []byte) error {
 			return err
 		}
 		outputs = append(outputs, output)
-		commitSum = *commitSum.Add(&output.Commitment)
-		stealthSum = *stealthSum.Add(&output.SenderPubKey)
+
+		if commitSum == nil {
+			commitSum = &output.Commitment
+			stealthSum = &output.SenderPubKey
+		} else {
+			commitSum = commitSum.Add(&output.Commitment)
+			stealthSum = stealthSum.Add(&output.SenderPubKey)
+		}
 	}
 
 	for i := s.nodeIndex + 1; i < len(s.nodes); i++ {
@@ -310,9 +314,15 @@ func (s *swapService) Backward(data []byte) error {
 			return err
 		}
 		kernels = append(kernels, kernel)
-		kernelExcess = *kernelExcess.Add(&kernel.Excess).
-			Sub(mw.NewCommitment(&mw.BlindingFactor{}, kernel.Fee))
-		stealthExcess = *stealthExcess.Add(&kernel.StealthExcess)
+
+		if kernelExcess == nil {
+			kernelExcess = &kernel.Excess
+			stealthExcess = &kernel.StealthExcess
+		} else {
+			kernelExcess = kernelExcess.Add(&kernel.Excess)
+			stealthExcess = stealthExcess.Add(&kernel.StealthExcess)
+		}
+		kernelExcess = kernelExcess.Sub(mw.NewCommitment(&mw.BlindingFactor{}, kernel.Fee))
 	}
 
 	for commit, o := range s.onions {
@@ -322,18 +332,18 @@ func (s *swapService) Backward(data []byte) error {
 			Sub(mw.NewCommitment(&mw.BlindingFactor{}, hop.Fee))
 
 		if slices.Contains(commits, *commit2) {
-			commitSum = *commitSum.Sub(commit2)
+			commitSum = commitSum.Sub(commit2)
 			stealthBlind := mw.SecretKey(hop.StealthBlind)
-			stealthSum = *stealthSum.Sub(o.StealthSum.Add(stealthBlind.PubKey()))
+			stealthSum = stealthSum.Sub(o.StealthSum.Add(stealthBlind.PubKey()))
 		} else {
 			delete(s.onions, commit)
 		}
 	}
 
-	if commitSum != kernelExcess {
+	if *commitSum != *kernelExcess {
 		return errors.New("commit invariant not satisfied")
 	}
-	if stealthSum != stealthExcess {
+	if *stealthSum != *stealthExcess {
 		return errors.New("stealth invariant not satisfied")
 	}
 

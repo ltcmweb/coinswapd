@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -52,6 +53,13 @@ func main() {
 	if err != nil {
 		return
 	}
+	if *serverKeyFlag == "" {
+		serverKeyBytes = make([]byte, 32)
+		if _, err = rand.Read(serverKeyBytes); err != nil {
+			return
+		}
+		fmt.Println("Using random private key", hex.EncodeToString(serverKeyBytes))
+	}
 	serverKey, err = ecdh.X25519().NewPrivateKey(serverKeyBytes)
 	if err != nil {
 		return
@@ -96,6 +104,9 @@ func main() {
 	go httpServer.ListenAndServe()
 
 	if *forceSwap {
+		for cs.ConnectedCount() == 0 {
+			time.Sleep(time.Second)
+		}
 		if err = ss.performSwap(); err != nil {
 			return
 		}
