@@ -161,18 +161,12 @@ func (s *swapService) getNodes() error {
 	pubKey := serverKey.PublicKey()
 	fmt.Println("Public key =", hex.EncodeToString(pubKey.Bytes()))
 
-	s.nodes = config.AliveNodes(context.Background(), pubKey)
-	s.nodeIndex = -1
+	s.nodes, s.nodeIndex = config.AliveNodes(context.Background(), pubKey)
 
-	for i, node := range s.nodes {
-		if node.PubKey().Equal(pubKey) {
-			fmt.Println("Node", i+1, "of", len(s.nodes))
-			s.nodeIndex = i
-		}
-	}
 	if s.nodeIndex < 0 {
 		return errors.New("public key not found in config")
 	}
+	fmt.Println("Node", s.nodeIndex+1, "of", len(s.nodes))
 	return nil
 }
 

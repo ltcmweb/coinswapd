@@ -21,9 +21,11 @@ func (node Node) PubKey() *ecdh.PublicKey {
 	return pubKey
 }
 
-func AliveNodes(ctx context.Context, pubKey *ecdh.PublicKey) (nodes []Node) {
+func AliveNodes(ctx context.Context, pubKey *ecdh.PublicKey) (nodes []Node, index int) {
+	index = -1
 	for _, node := range Nodes {
 		if pubKey != nil && node.PubKey().Equal(pubKey) {
+			index = len(nodes)
 			nodes = append(nodes, node)
 			continue
 		}

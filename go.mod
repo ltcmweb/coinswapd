@@ -7,7 +7,7 @@ require (
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/ltcmweb/ltcd v0.25.0
 	github.com/ltcmweb/ltcd/chaincfg/chainhash v1.0.3
-	github.com/ltcmweb/neutrino v0.17.1
+	github.com/ltcmweb/neutrino v0.17.2
 	github.com/ltcsuite/ltcwallet/walletdb v1.3.5
 	golang.org/x/crypto v0.22.0
 	lukechampine.com/blake3 v1.2.1
