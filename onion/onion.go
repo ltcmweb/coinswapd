@@ -66,7 +66,11 @@ func New(hops []*Hop) (*Onion, error) {
 		payloads [][]byte
 	)
 	for i, hop := range hops {
-		ciphers = append(ciphers, NewCipher(privKey, hop.PubKey))
+		cipher, err := NewCipher(privKey, hop.PubKey)
+		if err != nil {
+			return nil, err
+		}
+		ciphers = append(ciphers, cipher)
 
 		privKey, err = ecdh.X25519().GenerateKey(rand.Reader)
 		if err != nil {
@@ -111,12 +115,14 @@ func New(hops []*Hop) (*Onion, error) {
 	return onion, nil
 }
 
-func NewCipher(privKey *ecdh.PrivateKey, pubKey *ecdh.PublicKey) *chacha20.Cipher {
-	secret, _ := privKey.ECDH(pubKey)
+func NewCipher(privKey *ecdh.PrivateKey, pubKey *ecdh.PublicKey) (*chacha20.Cipher, error) {
+	secret, err := privKey.ECDH(pubKey)
+	if err != nil {
+		return nil, err
+	}
 	h := hmac.New(sha256.New, []byte("MWIXNET"))
 	h.Write(secret)
-	cipher, _ := chacha20.NewUnauthenticatedCipher(h.Sum(nil), []byte("NONCE1234567"))
-	return cipher
+	return chacha20.NewUnauthenticatedCipher(h.Sum(nil), []byte("NONCE1234567"))
 }
 
 func (onion *Onion) Sign(input *wire.MwebInput, spendKey *mw.SecretKey) {
@@ -165,7 +171,10 @@ func (onion *Onion) Peel(privKey *ecdh.PrivateKey) (*Hop, *Onion, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	cipher := NewCipher(privKey, pubKey)
+	cipher, err := NewCipher(privKey, pubKey)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var (
 		count, size uint64

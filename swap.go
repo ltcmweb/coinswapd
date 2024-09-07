@@ -131,7 +131,10 @@ func (s *swapService) forward() error {
 	}
 
 	node := s.nodes[s.nodeIndex+1]
-	cipher := onion.NewCipher(serverKey, node.PubKey())
+	cipher, err := onion.NewCipher(serverKey, node.PubKey())
+	if err != nil {
+		return err
+	}
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
 	client, err := rpc.Dial(node.Url)
@@ -158,7 +161,10 @@ func (s *swapService) Forward(data []byte) error {
 	}
 
 	node := s.nodes[s.nodeIndex-1]
-	cipher := onion.NewCipher(serverKey, node.PubKey())
+	cipher, err := onion.NewCipher(serverKey, node.PubKey())
+	if err != nil {
+		return err
+	}
 	cipher.XORKeyStream(data, data)
 
 	var commits []mw.Commitment
@@ -184,16 +190,16 @@ func (s *swapService) backward(
 	kernels []*wire.MwebKernel) error {
 
 	var (
-		kernelBlind  mw.BlindingFactor
-		stealthBlind mw.BlindingFactor
-		senderKey    mw.SecretKey
+		kernelBlind  = &mw.BlindingFactor{}
+		stealthBlind = &mw.BlindingFactor{}
+		senderKey    = &mw.SecretKey{}
 		nodeFee      uint64
 	)
 
 	for _, o := range s.onions {
 		hop, _, _ := o.Onion.Peel(serverKey)
-		kernelBlind = *kernelBlind.Add(&hop.KernelBlind)
-		stealthBlind = *stealthBlind.Add(&hop.StealthBlind)
+		kernelBlind = kernelBlind.Add(&hop.KernelBlind)
+		stealthBlind = stealthBlind.Add(&hop.StealthBlind)
 		nodeFee += hop.Fee
 	}
 
@@ -212,14 +218,14 @@ func (s *swapService) backward(
 		return err
 	}
 	output, blind, _ := mweb.CreateOutput(&mweb.Recipient{
-		Value: nodeFee, Address: feeAddress}, &senderKey)
-	mweb.SignOutput(output, nodeFee, blind, &senderKey)
-	kernelBlind = *kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
-	stealthBlind = *stealthBlind.Add((*mw.BlindingFactor)(&senderKey))
+		Value: nodeFee, Address: feeAddress}, senderKey)
+	mweb.SignOutput(output, nodeFee, blind, senderKey)
+	kernelBlind = kernelBlind.Add(mw.BlindSwitch(blind, nodeFee))
+	stealthBlind = stealthBlind.Add((*mw.BlindingFactor)(senderKey))
 	outputs = append(outputs, output)
 
 	kernels = append(kernels, mweb.CreateKernel(
-		&kernelBlind, &stealthBlind, &fee, nil, nil, nil))
+		kernelBlind, stealthBlind, &fee, nil, nil, nil))
 
 	slices.SortFunc(outputs, func(o1, o2 *wire.MwebOutput) int {
 		a := new(big.Int).SetBytes(o1.Hash()[:])
@@ -243,7 +249,10 @@ func (s *swapService) backward(
 	}
 
 	node := s.nodes[s.nodeIndex-1]
-	cipher := onion.NewCipher(serverKey, node.PubKey())
+	cipher, err := onion.NewCipher(serverKey, node.PubKey())
+	if err != nil {
+		return err
+	}
 	cipher.XORKeyStream(data.Bytes(), data.Bytes())
 
 	client, err := rpc.Dial(node.Url)
@@ -270,7 +279,10 @@ func (s *swapService) Backward(data []byte) error {
 	}
 
 	node := s.nodes[s.nodeIndex+1]
-	cipher := onion.NewCipher(serverKey, node.PubKey())
+	cipher, err := onion.NewCipher(serverKey, node.PubKey())
+	if err != nil {
+		return err
+	}
 	cipher.XORKeyStream(data, data)
 
 	var (
