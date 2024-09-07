@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -14,5 +15,12 @@ func TestNodes(t *testing.T) {
 		if len(Nodes) != n+1 || Nodes[n] != (Node{"url1", pk}) {
 			t.Fatal()
 		}
+	}
+}
+
+func TestSigs(t *testing.T) {
+	f, _ := os.Open("sigs.tar")
+	if checkSigCount([]byte("hello\n"), f) != 1 {
+		t.Fatal()
 	}
 }
