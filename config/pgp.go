@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/crypto/openpgp"
@@ -51,7 +52,9 @@ func verifyPgpSig(signed, signature io.Reader) (string, bool) {
 	}
 	for signer := range signers {
 		key, err := fetchPgpKey(signer)
-		if err != nil {
+		if os.IsTimeout(err) {
+			break
+		} else if err != nil {
 			continue
 		}
 		_, err = openpgp.CheckDetachedSignature(key, signed, bytes.NewReader(sig))

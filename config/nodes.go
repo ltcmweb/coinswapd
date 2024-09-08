@@ -26,6 +26,10 @@ var Nodes = []Node{
 		Url:    "https://liteworlds.quest/coinswap",
 		pubKey: "a7eb3f598607a367f1e152f82f37ca7543a50b0e09d85bdae4d0476af8b2d32f",
 	},
+	{
+		Url:    "https://coinswap.zgondea.com:3133",
+		pubKey: "a95718cf1651de0902333e48492adfa351c747a61855ee3f6a9d76cdb3f5c672",
+	},
 }
 
 func fetchFile(name string) ([]byte, error) {
